@@ -798,9 +798,12 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   el.classList.add("active");
-  ["dashboard","inventory","sold","trades","monthly","settings"].forEach(t =>
-    document.getElementById("tab-"+t).style.display = t === tab ? "" : "none"
-  );
+  ["dashboard","inventory","sold","trades","monthly","settings"].forEach(t => {
+    const tabEl = document.getElementById("tab-" + t);
+    tabEl.style.display = t === tab ? "" : "none";
+    // タブ切り替え時にリストのフィルターバーをリセット（再構築させる）
+    if (t !== tab && (t === "inventory" || t === "sold")) tabEl.innerHTML = "";
+  });
   renderCurrentTab();
 }
 
@@ -1048,9 +1051,14 @@ function openImgViewer(src) {
 // ═══════════ LIST ═══════════
 let filterGenre = "全て", filterStatus = "全て", filterSearch = "", sortKey = "buyDate", sortDir = -1, isConsolidated = false;
 
+// リストボディのみ再描画（フィルターバーは触らない）
+function renderListBody(tab) {
+  renderList(tab);
+}
+
 function renderList(tab) {
   const isSoldTab = tab === "sold";
-  
+
   let arr = [];
   if (isSoldTab) arr = items.filter(i => i.status === "sold");
   else arr = [...items];
@@ -1069,22 +1077,57 @@ function renderList(tab) {
   const icons = {"トレカ":"🃏","スマートフォン":"📱","ゲーム機・ソフト":"🎮","その他":"📦"};
 
   const tabEl = document.getElementById("tab-" + tab);
-  tabEl.innerHTML = `
-    <div class="filters">
-      <input class="filter-input" placeholder="🔍 商品名・店舗・メモで検索" value="${filterSearch}"
-        oninput="filterSearch=this.value;renderList('${tab}')" />
-      <select class="filter-select" onchange="filterGenre=this.value;renderList('${tab}')">
-        ${["全て",...GENRES].map(g=>`<option value="${g}" ${g===filterGenre?"selected":""}>${g}</option>`).join("")}
-      </select>
-      ${!isSoldTab ? `<select class="filter-select" onchange="filterStatus=this.value;renderList('${tab}')">
-        ${["全て","holding","sold","personal","lost"].map(s=>`<option value="${s}" ${s===filterStatus?"selected":""}>${s==="全て"?"全ステータス":s==="holding"?"在庫中":s==="sold"?"売却済":s==="personal"?"個人利用":"損失"}</option>`).join("")}
-      </select>` : ""}
-      <button onclick="isConsolidated=!isConsolidated;renderList('${tab}')" class="btn-secondary" style="background:${isConsolidated?"var(--text)":"var(--surface2)"};color:${isConsolidated?"#fff":"var(--text)"};white-space:nowrap;padding:0 12px;font-size:12px;display:flex;align-items:center;gap:4px;">
-        ${isConsolidated?"✅":"🔄"} まとめ
-      </button>
-      <button onclick="gasGet()" class="btn-secondary">🔄</button>
-    </div>
-    <div id="list-body-${tab}"></div>`;
+
+  // フィルターバーは初回のみ構築（再レンダリング時はDOMを再利用してフォーカスを保持）
+  if (!document.getElementById("list-body-" + tab)) {
+    tabEl.innerHTML = `
+      <div class="filters" id="list-filters-${tab}">
+        <input class="filter-input" id="list-search-${tab}" placeholder="🔍 商品名・店舗・メモで検索" value="${filterSearch}" autocomplete="off" />
+        <select class="filter-select" id="list-genre-${tab}">
+          ${["全て",...GENRES].map(g=>`<option value="${g}" ${g===filterGenre?"selected":""}>${g}</option>`).join("")}
+        </select>
+        ${!isSoldTab ? `<select class="filter-select" id="list-status-${tab}">
+          ${["全て","holding","sold","personal","lost"].map(s=>`<option value="${s}" ${s===filterStatus?"selected":""}>${s==="全て"?"全ステータス":s==="holding"?"在庫中":s==="sold"?"売却済":s==="personal"?"個人利用":"損失"}</option>`).join("")}
+        </select>` : ""}
+        <button id="list-consolidated-${tab}" class="btn-secondary" style="white-space:nowrap;padding:0 12px;font-size:12px;display:flex;align-items:center;gap:4px;">
+          ${isConsolidated?"✅":"🔄"} まとめ
+        </button>
+        <button onclick="gasGet()" class="btn-secondary">🔄</button>
+      </div>
+      <div id="list-body-${tab}"></div>`;
+
+    // イベントリスナーを一度だけ登録
+    document.getElementById("list-search-" + tab).addEventListener("input", e => {
+      filterSearch = e.target.value;
+      renderListBody(tab);
+    });
+    document.getElementById("list-genre-" + tab).addEventListener("change", e => {
+      filterGenre = e.target.value;
+      renderListBody(tab);
+    });
+    const statusEl = document.getElementById("list-status-" + tab);
+    if (statusEl) statusEl.addEventListener("change", e => {
+      filterStatus = e.target.value;
+      renderListBody(tab);
+    });
+    document.getElementById("list-consolidated-" + tab).addEventListener("click", () => {
+      isConsolidated = !isConsolidated;
+      renderList(tab); // まとめ切替はボタン表示も変わるので全更新
+    });
+  } else {
+    // セレクトの選択状態だけ同期（検索欄はフォーカス中なので触らない）
+    const genreEl = document.getElementById("list-genre-" + tab);
+    if (genreEl) genreEl.value = filterGenre;
+    const statusEl = document.getElementById("list-status-" + tab);
+    if (statusEl) statusEl.value = filterStatus;
+    const consolidatedBtn = document.getElementById("list-consolidated-" + tab);
+    if (consolidatedBtn) {
+      consolidatedBtn.style.background = isConsolidated ? "var(--text)" : "var(--surface2)";
+      consolidatedBtn.style.color = isConsolidated ? "#fff" : "var(--text)";
+      consolidatedBtn.innerHTML = (isConsolidated?"✅":"🔄") + " まとめ";
+    }
+  }
+
   const listBody = document.getElementById("list-body-" + tab);
 
   listBody.innerHTML = `
