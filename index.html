@@ -1145,10 +1145,11 @@ function renderList(tab) {
             groups[k].items.push(i);
           });
           displayArr = Object.values(groups).sort((a,b) => b.qty - a.qty);
-          // holding/sold 内訳を計算
+          // holding/personal/sold 内訳を計算
           displayArr.forEach(g => {
-            g.holdingQty = g.items.filter(i => i.status === "holding" || i.status === "personal").reduce((s,i) => s+(Number(i.quantity)||1), 0);
-            g.soldQty    = g.items.filter(i => i.status === "sold").reduce((s,i) => s+(Number(i.quantity)||1), 0);
+            g.holdingQty  = g.items.filter(i => i.status === "holding").reduce((s,i) => s+(Number(i.quantity)||1), 0);
+            g.personalQty = g.items.filter(i => i.status === "personal").reduce((s,i) => s+(Number(i.quantity)||1), 0);
+            g.soldQty     = g.items.filter(i => i.status === "sold").reduce((s,i) => s+(Number(i.quantity)||1), 0);
           });
         }
 
@@ -1160,6 +1161,7 @@ function renderList(tab) {
                 <div class="item-name">${icons[item.genre]||"📦"} ${item.name}</div>
                 <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
                   ${item.holdingQty > 0 ? `<span class="badge badge-holding" style="font-size:11px;">📦 在庫 ${item.holdingQty}点</span>` : ""}
+                  ${item.personalQty > 0 ? `<span class="badge badge-personal" style="font-size:11px;">👤 個人利用 ${item.personalQty}点</span>` : ""}
                   ${item.soldQty > 0 ? `<span class="badge badge-sold" style="font-size:11px;">💰 売却 ${item.soldQty}点</span>` : ""}
                 </div>
               </div>
