@@ -17,6 +17,7 @@
     --accent:  #1A1A1A;
     --green:   #1A7A3A;
     --red:     #B71C1C;
+    --blue:    #1565C0;
     --font-body: 'Noto Sans JP', sans-serif;
   }
 
@@ -730,6 +731,17 @@ async function saveItem(formData) {
 }
 
 // ═══════════ UTILS ═══════════
+function statusBadge(status) {
+  const map = {
+    holding:  ["在庫中",  "badge-holding"],
+    sold:     ["売却済",  "badge-sold"],
+    personal: ["個人利用","badge-personal"],
+    lost:     ["損失",    "badge-lost"],
+  };
+  const [label, cls] = map[status] || ["不明", ""];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
 function getJSTDate() {
   // 指定したタイムゾーン(Asia/Tokyo)で YYYY-MM-DD 形式を取得する最も確実な方法
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" });
@@ -800,11 +812,12 @@ function renderCurrentTab() {
 
 // ═══════════ DASHBOARD ═══════════
 function renderDashboard() {
-  // 年一覧の抽出
-  const availableYears = [...new Set(items.flatMap(i => [
+  // 年一覧の抽出（今年を常に含む）
+  const currentYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
+  const availableYears = [...new Set([currentYear, ...items.flatMap(i => [
     i.buyDate ? i.buyDate.split("-")[0] : null,
     i.sellDate ? i.sellDate.split("-")[0] : null
-  ]))].filter(y => y && y.length === 4 && !isNaN(y)).sort((a,b) => b.localeCompare(a));
+  ])])].filter(y => y && y.length === 4 && !isNaN(y)).sort((a,b) => b.localeCompare(a));
 
   const sold = items.filter(i => i.status === "sold");
   const holding = items.filter(i => i.status === "holding");
@@ -892,7 +905,7 @@ function renderDashboard() {
 }
 
 // ═══════════ TRADES (売買履歴) ═══════════
-let tradesSearch = "", tradesGenre = "全て", tradesMonth = "", dashboardYearFilter = "全て";
+let tradesSearch = "", tradesGenre = "全て", tradesMonth = "", dashboardYearFilter = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
 
 function renderTrades() {
   const sold = items.filter(i => i.status === "sold");
@@ -1051,36 +1064,25 @@ function renderList(tab) {
   });
 
   const icons = {"トレカ":"🃏","スマートフォン":"📱","ゲーム機・ソフト":"🎮","その他":"📦"};
-  const statusBadge = s => {
-    const labels = {"holding":"在庫中","sold":"売却済","personal":"個人利用","lost":"損失"};
-    return `<span class="badge badge-${s}">${labels[s] || "不明("+s+")"}</span>`;
-  };
 
-  const container = document.getElementById("tab-"+tab);
-  if (!container.querySelector('.list-body')) {
-    container.innerHTML = `<div class="filters-wrap"></div><div class="list-body"></div>`;
-  }
-  const filterWrap = container.querySelector('.filters-wrap');
-  const listBody = container.querySelector('.list-body');
-
-  // フィルター部分の最小限の更新（IME保護のため、検索入力中はフィルタUI全体を書き換えない）
-  if (document.activeElement?.id !== `search-input-${tab}`) {
-    filterWrap.innerHTML = `
-      <div class="filters">
-        <input class="filter-input" id="search-input-${tab}" placeholder="🔍 商品名・店舗で検索" value="${filterSearch}"
-          oninput="filterSearch=this.value;renderList('${tab}')" />
-        <select class="filter-select" onchange="filterGenre=this.value;renderList('${tab}')">
-          ${["全て",...GENRES].map(g=>`<option value="${g}" ${g===filterGenre?"selected":""}>${g}</option>`).join("")}
-        </select>
-        ${!isSoldTab ? `<select class="filter-select" onchange="filterStatus=this.value;renderList('${tab}')">
-          ${["全て","holding","sold","personal","lost"].map(s=>`<option value="${s}" ${s===filterStatus?"selected":""}>${s==="全て"?"全ステータス":s==="holding"?"在庫中":s==="sold"?"売却済":s==="personal"?"個人利用":"損失"}</option>`).join("")}
-        </select>` : ""}
-        <button onclick="isConsolidated=!isConsolidated;renderList('${tab}')" class="btn-secondary" style="background:${isConsolidated?"var(--text)":"var(--surface2)"};color:${isConsolidated?"#fff":"var(--text)"};white-space:nowrap;padding:0 12px;font-size:12px;display:flex;align-items:center;gap:4px;">
-          ${isConsolidated?"✅":"🔄"} まとめ
-        </button>
-        <button onclick="gasGet()" class="btn-secondary">🔄</button>
-      </div>`;
-  }
+  const tabEl = document.getElementById("tab-" + tab);
+  tabEl.innerHTML = `
+    <div class="filters">
+      <input class="filter-input" placeholder="🔍 商品名・店舗・メモで検索" value="${filterSearch}"
+        oninput="filterSearch=this.value;renderList('${tab}')" />
+      <select class="filter-select" onchange="filterGenre=this.value;renderList('${tab}')">
+        ${["全て",...GENRES].map(g=>`<option value="${g}" ${g===filterGenre?"selected":""}>${g}</option>`).join("")}
+      </select>
+      ${!isSoldTab ? `<select class="filter-select" onchange="filterStatus=this.value;renderList('${tab}')">
+        ${["全て","holding","sold","personal","lost"].map(s=>`<option value="${s}" ${s===filterStatus?"selected":""}>${s==="全て"?"全ステータス":s==="holding"?"在庫中":s==="sold"?"売却済":s==="personal"?"個人利用":"損失"}</option>`).join("")}
+      </select>` : ""}
+      <button onclick="isConsolidated=!isConsolidated;renderList('${tab}')" class="btn-secondary" style="background:${isConsolidated?"var(--text)":"var(--surface2)"};color:${isConsolidated?"#fff":"var(--text)"};white-space:nowrap;padding:0 12px;font-size:12px;display:flex;align-items:center;gap:4px;">
+        ${isConsolidated?"✅":"🔄"} まとめ
+      </button>
+      <button onclick="gasGet()" class="btn-secondary">🔄</button>
+    </div>
+    <div id="list-body-${tab}"></div>`;
+  const listBody = document.getElementById("list-body-" + tab);
 
   listBody.innerHTML = `
     <div class="item-count">${arr.length} ${isConsolidated?"種類":"件"}</div>
@@ -1097,32 +1099,40 @@ function renderList(tab) {
             groups[k].items.push(i);
           });
           displayArr = Object.values(groups).sort((a,b) => b.qty - a.qty);
+          // holding/sold 内訳を計算
+          displayArr.forEach(g => {
+            g.holdingQty = g.items.filter(i => i.status === "holding" || i.status === "personal").reduce((s,i) => s+(Number(i.quantity)||1), 0);
+            g.soldQty    = g.items.filter(i => i.status === "sold").reduce((s,i) => s+(Number(i.quantity)||1), 0);
+          });
         }
 
         return displayArr.map(item => {
           if (isConsolidated) {
-            const avg = Math.round(item.buyTotal / item.qty);
             return `
-            <div class="item-card" style="border-left:4px solid var(--blue);">
+            <div class="item-card" style="border-left:4px solid var(--text);">
               <div class="item-top">
                 <div class="item-name">${icons[item.genre]||"📦"} ${item.name}</div>
-                <div class="qty-badge" style="background:var(--blue);color:#fff;font-size:12px;padding:4px 10px;">合計 ${item.qty} 点</div>
+                <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+                  ${item.holdingQty > 0 ? `<span class="badge badge-holding" style="font-size:11px;">📦 在庫 ${item.holdingQty}点</span>` : ""}
+                  ${item.soldQty > 0 ? `<span class="badge badge-sold" style="font-size:11px;">💰 売却 ${item.soldQty}点</span>` : ""}
+                </div>
               </div>
               <div class="item-nums" style="margin-top:12px;">
                 <div class="num-block">
                   <div class="num-label">平均仕入単価</div>
-                  <div class="num-value">¥${avg.toLocaleString()}</div>
+                  <div class="num-value">¥${Math.round(item.buyTotal/item.qty).toLocaleString()}</div>
                 </div>
                 <div class="num-block">
                   <div class="num-label">総投資額</div>
-                  <div class="num-value blue">¥${item.buyTotal.toLocaleString()}</div>
+                  <div class="num-value">¥${item.buyTotal.toLocaleString()}</div>
                 </div>
                 <div class="num-block">
                   <div class="num-label">内訳</div>
                   <div class="num-value" style="font-size:11px;color:var(--muted);">${item.items.length} 回の仕入</div>
                 </div>
               </div>
-              <div style="margin-top:10px;text-align:right;">
+              <div style="margin-top:10px;display:flex;gap:6px;justify-content:flex-end;">
+                ${item.holdingQty > 0 ? `<button class="btn-secondary" style="font-size:10px;padding:4px 10px;" onclick="openPartialSaleModal('${item.name.replace(/'/g,"\\'")}')">一部売却 💰</button>` : ""}
                 <button class="btn-secondary" style="font-size:10px;padding:4px 8px;" onclick="filterSearch='${item.name.replace(/'/g,"\\'")}';isConsolidated=false;renderList('${tab}')">詳細を見る 🔍</button>
               </div>
             </div>`;
@@ -1167,6 +1177,125 @@ function renderList(tab) {
       })()}
   `;
 
+}
+
+// ═══════════ PARTIAL SALE MODAL ═══════════
+function openPartialSaleModal(productName) {
+  const holdingItems = items.filter(i => i.name === productName && (i.status === "holding" || i.status === "personal"));
+  if (!holdingItems.length) { showToast("在庫がありません", "error"); return; }
+
+  const totalHolding = holdingItems.reduce((s, i) => s + (Number(i.quantity)||1), 0);
+
+  // モーダルを流用して表示
+  editingId = null;
+  document.getElementById("modal-title").textContent = `一部売却: ${productName}`;
+  document.getElementById("modal-body").innerHTML = `
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px;">在庫 ${totalHolding} 点のうち、今回いくつ売却するか選択してください。</p>
+    <div class="form-group">
+      <label class="form-label">売却数量</label>
+      <input class="form-input" type="number" id="partial-qty" min="1" max="${totalHolding}" value="1" style="max-width:120px;" />
+      <span style="font-size:12px;color:var(--muted);margin-left:8px;">最大10: ${totalHolding}点</span>
+    </div>
+    <div class="form-row">
+      <div>
+        <label class="form-label">販売日</label>
+        <input class="form-input" type="date" id="partial-date" value="${getJSTDate()}" />
+      </div>
+      <div>
+        <label class="form-label">販売プラットフォーム</label>
+        <select class="form-input" id="partial-platform">
+          ${PLATFORMS.map(p => `<option>${p}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label class="form-label">販売価格（合計）</label>
+        <input class="form-input" type="number" id="partial-price" placeholder="0" />
+      </div>
+      <div>
+        <label class="form-label">送料</label>
+        <input class="form-input" type="number" id="partial-shipping" placeholder="0" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">手数料</label>
+      <input class="form-input" type="number" id="partial-fee" placeholder="0" />
+    </div>
+    <div class="form-actions" style="margin-top:16px;">
+      <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="btn-save" onclick="executePartialSale('${productName.replace(/'/g,"\\'")}')">売却を記録する 💰</button>
+    </div>
+  `;
+  document.getElementById("modal").classList.add("open");
+}
+
+async function executePartialSale(productName) {
+  const qty = parseInt(document.getElementById("partial-qty").value) || 1;
+  const date = document.getElementById("partial-date").value;
+  const platform = document.getElementById("partial-platform").value;
+  const price = Number(document.getElementById("partial-price").value) || 0;
+  const shipping = Number(document.getElementById("partial-shipping").value) || 0;
+  const fee = Number(document.getElementById("partial-fee").value) || 0;
+
+  if (!date) { showToast("販売日を入力してください", "error"); return; }
+
+  // 在庫アイテムから優先的に消費
+  const holdingItems = items.filter(i => i.name === productName && (i.status === "holding" || i.status === "personal"));
+  const totalHolding = holdingItems.reduce((s, i) => s + (Number(i.quantity)||1), 0);
+
+  if (qty < 1 || qty > totalHolding) {
+    showToast(`有効な数量を入力してください (1〜${totalHolding})`, "error"); return;
+  }
+
+  const btn = document.querySelector(".modal-box .btn-save");
+  if (btn) { btn.disabled = true; btn.textContent = "処理中..."; }
+
+  // 数量を調整または sold 化する
+  let remaining = qty;
+  for (const item of holdingItems) {
+    if (remaining <= 0) break;
+    const itemQty = Number(item.quantity) || 1;
+    if (itemQty <= remaining) {
+      // このアイテム全部を売却済みに
+      remaining -= itemQty;
+      const updated = { ...item,
+        status: "sold",
+        sellDate: date,
+        sellPlatform: platform,
+        sellPrice: Math.round(price * (itemQty / qty)),
+        shippingFee: Math.round(shipping * (itemQty / qty)),
+        platformFee: Math.round(fee * (itemQty / qty)),
+      };
+      const idx = items.findIndex(i => String(i.id) === String(item.id));
+      if (idx !== -1) items[idx] = updated;
+      await gasPost({ action: "update", item: updated });
+    } else {
+      // このアイテムを分割: 一部を sold に、残りを holding のまま
+      const sellPart = { ...item,
+        id: Date.now() + Math.random(),
+        quantity: remaining,
+        status: "sold",
+        sellDate: date,
+        sellPlatform: platform,
+        sellPrice: Math.round(price * (remaining / qty)),
+        shippingFee: Math.round(shipping * (remaining / qty)),
+        platformFee: Math.round(fee * (remaining / qty)),
+      };
+      const holdPart = { ...item, quantity: itemQty - remaining };
+      const idx = items.findIndex(i => String(i.id) === String(item.id));
+      if (idx !== -1) items[idx] = holdPart;
+      items.splice(idx, 0, sellPart);
+      await gasPost({ action: "update", item: holdPart });
+      await gasPost({ action: "add", item: sellPart });
+      remaining = 0;
+    }
+  }
+
+  await saveData(KEYS.items, items);
+  closeModal();
+  renderCurrentTab();
+  showToast(`✅ ${qty}点を売却済みに登録しました`, "success");
 }
 
 // ═══════════ SETTINGS ═══════════
@@ -1619,7 +1748,7 @@ function openEditModal(id) {
     ...item, 
     boxCondition: item.boxCondition || "", 
     buyReceipt: imgs.receipt || null, 
-    buyDoc: imgs.doc || null 
+    buyDoc: imgs.buyDoc || null 
   };
   document.getElementById("modal-title").textContent = "商品を編集";
   renderForm();
@@ -1673,7 +1802,7 @@ function imgUploadHtml(field, f) {
   }
 
   const delBtn = fileData && editingId ? `
-    <button type="button" onclick="removeImage('"${editingId}"','${field}')"
+    <button type="button" onclick="removeImage('${editingId}','${field}')"
       style="position:absolute;top:6px;right:6px;background:var(--surface);
       border:1px solid var(--border);border-radius:4px;padding:2px 8px;
       font-size:11px;color:var(--muted);cursor:pointer;font-family:inherit;">✕ 削除</button>` : "";
