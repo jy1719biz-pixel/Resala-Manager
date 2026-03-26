@@ -379,6 +379,7 @@
       <button class="tab-btn" onclick="switchTab('inventory',this)">📦 在庫</button>
       <button class="tab-btn" onclick="switchTab('sold',this)">💰 売却済</button>
       <button class="tab-btn" onclick="switchTab('trades',this)">🔄 売買履歴</button>
+      <button class="tab-btn" onclick="switchTab('monthly',this)">📅 月次レポート</button>
       <button class="tab-btn" onclick="switchTab('settings',this)">⚙️ 設定</button>
     </div>
   </div>
@@ -388,6 +389,7 @@
     <div id="tab-inventory" style="display:none"></div>
     <div id="tab-sold" style="display:none"></div>
     <div id="tab-trades" style="display:none"></div>
+    <div id="tab-monthly" style="display:none"></div>
     <div id="tab-settings" style="display:none"></div>
   </div>
 </div>
@@ -796,7 +798,7 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   el.classList.add("active");
-  ["dashboard","inventory","sold","trades","settings"].forEach(t =>
+  ["dashboard","inventory","sold","trades","monthly","settings"].forEach(t =>
     document.getElementById("tab-"+t).style.display = t === tab ? "" : "none"
   );
   renderCurrentTab();
@@ -807,6 +809,7 @@ function renderCurrentTab() {
   else if (currentTab === "inventory") renderList("inventory");
   else if (currentTab === "sold")      renderList("sold");
   else if (currentTab === "trades")    renderTrades();
+  else if (currentTab === "monthly")   renderMonthly();
   else if (currentTab === "settings")  renderSettings();
 }
 
@@ -1296,6 +1299,179 @@ async function executePartialSale(productName) {
   closeModal();
   renderCurrentTab();
   showToast(`✅ ${qty}点を売却済みに登録しました`, "success");
+}
+
+// ═══════════ MONTHLY REPORT ═══════════
+let monthlyYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
+
+function renderMonthly() {
+  const allYears = [...new Set([
+    monthlyYear,
+    ...items.flatMap(i => [
+      i.buyDate  ? i.buyDate.slice(0,4)  : null,
+      i.sellDate ? i.sellDate.slice(0,4) : null
+    ])
+  ])].filter(y => y && y.length === 4 && !isNaN(y)).sort((a,b) => b.localeCompare(a));
+
+  const MONTHS = ["01","02","03","04","05","06","07","08","09","10","11","12"];
+  const MONTH_LABELS = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+
+  // 月ごとに集計
+  const monthData = MONTHS.map((m, idx) => {
+    const ym = `${monthlyYear}-${m}`;
+    const bought  = items.filter(i => (i.buyDate||"").startsWith(ym));
+    const sold    = items.filter(i => i.status === "sold" && (i.sellDate||"").startsWith(ym));
+
+    const buyCost  = bought.reduce((s,i) => s + (Number(i.buyPrice)||0)*(Number(i.quantity)||1) + (Number(i.buyShippingFee)||0) + (Number(i.buyPlatformFee)||0), 0);
+    const sellRev  = sold.reduce((s,i) => s + (Number(i.sellPrice)||0)*(Number(i.quantity)||1), 0);
+    const sellCost = sold.reduce((s,i) => s + (Number(i.buyPrice)||0)*(Number(i.quantity)||1) + (Number(i.buyShippingFee)||0) + (Number(i.buyPlatformFee)||0) + (Number(i.shippingFee)||0) + (Number(i.platformFee)||0), 0);
+    const profit   = sold.reduce((s,i) => s + (calcProfit(i)||0), 0);
+    const margin   = sellRev > 0 ? Math.round(profit / sellRev * 100) : null;
+    const boughtQty = bought.reduce((s,i) => s + (Number(i.quantity)||1), 0);
+    const soldQty   = sold.reduce((s,i) => s + (Number(i.quantity)||1), 0);
+
+    return { label: MONTH_LABELS[idx], ym, bought, sold, buyCost, sellRev, profit, margin, boughtQty, soldQty };
+  });
+
+  const activeMonths = monthData.filter(d => d.boughtQty > 0 || d.soldQty > 0);
+  const totalProfit  = monthData.reduce((s,d) => s + d.profit, 0);
+  const totalRev     = monthData.reduce((s,d) => s + d.sellRev, 0);
+  const totalBuyCost = monthData.reduce((s,d) => s + d.buyCost, 0);
+  const totalSoldQty = monthData.reduce((s,d) => s + d.soldQty, 0);
+
+  const profitMonths = activeMonths.filter(d => d.sold.length > 0);
+  const bestMonth  = profitMonths.length ? profitMonths.reduce((a,b) => a.profit > b.profit ? a : b) : null;
+  const worstMonth = profitMonths.length ? profitMonths.reduce((a,b) => a.profit < b.profit ? a : b) : null;
+
+  // SVG棒グラフ
+  const maxAbsProfit = Math.max(1, ...monthData.map(d => Math.abs(d.profit)));
+  const barW = 28, barGap = 8, svgW = (barW + barGap) * 12 + barGap;
+  const chartH = 120, baseline = 80;
+  const bars = monthData.map((d, i) => {
+    const h = Math.round(Math.abs(d.profit) / maxAbsProfit * (d.profit >= 0 ? baseline : (chartH - baseline - 4)));
+    const x = barGap + i * (barW + barGap);
+    const y = d.profit >= 0 ? baseline - h : baseline;
+    const color = d.profit > 0 ? "var(--green)" : d.profit < 0 ? "var(--red)" : "var(--border)";
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${Math.max(h,2)}" rx="3" fill="${color}" opacity="${d.sold.length===0?0.25:0.9}"/>`;
+  }).join("");
+  const labels = monthData.map((d,i) => {
+    const x = barGap + i * (barW + barGap) + barW/2;
+    return `<text x="${x}" y="${chartH+14}" text-anchor="middle" font-size="9" fill="var(--muted)">${d.label.replace("月","")}</text>`;
+  }).join("");
+  const baseline_line = `<line x1="0" y1="${baseline}" x2="${svgW}" y2="${baseline}" stroke="var(--border)" stroke-width="1"/>`;
+  const svgChart = `
+    <svg viewBox="0 0 ${svgW} ${chartH+20}" xmlns="http://www.w3.org/2000/svg" style="width:100%;overflow:visible;">
+      ${baseline_line}${bars}${labels}
+    </svg>`;
+
+  // ジャンル×月クロス集計
+  const genreMonthProfit = {};
+  GENRES.forEach(g => {
+    genreMonthProfit[g] = monthData.map(d =>
+      d.sold.filter(i => i.genre === g).reduce((s,i) => s + (calcProfit(i)||0), 0)
+    );
+  });
+  const activeGenres = GENRES.filter(g => genreMonthProfit[g].some(v => v !== 0));
+
+  const crossTable = activeGenres.length ? `
+    <div class="settings-card" style="overflow-x:auto;">
+      <div class="chart-title">GENRE × MONTH</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:420px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:5px 8px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--border);">ジャンル</th>
+            ${MONTH_LABELS.map(l => `<th style="text-align:right;padding:5px 4px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--border);">${l}</th>`).join("")}
+            <th style="text-align:right;padding:5px 8px;color:var(--muted);font-weight:700;border-bottom:1px solid var(--border);">合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${activeGenres.map(g => {
+            const vals = genreMonthProfit[g];
+            const total = vals.reduce((s,v)=>s+v,0);
+            return `<tr>
+              <td style="padding:6px 8px;font-weight:700;white-space:nowrap;">${g}</td>
+              ${vals.map(v => `<td style="text-align:right;padding:6px 4px;color:${v>0?"var(--green)":v<0?"var(--red)":"var(--muted)"};">${v===0?"—":(v>0?"+":"")+v.toLocaleString()}</td>`).join("")}
+              <td style="text-align:right;padding:6px 8px;font-weight:900;color:${total>=0?"var(--green)":"var(--red)"};">${total>=0?"+":""}¥${total.toLocaleString()}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>` : "";
+
+  document.getElementById("tab-monthly").innerHTML = `
+    <!-- 年セレクタ -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <span style="font-size:13px;font-weight:700;color:var(--muted);">📅 集計年:</span>
+      <select class="filter-select" onchange="monthlyYear=this.value;renderMonthly()">
+        ${allYears.map(y => `<option value="${y}" ${y===monthlyYear?"selected":""}>${y}年</option>`).join("")}
+      </select>
+    </div>
+
+    <!-- 年間サマリー -->
+    <div class="stats-grid" style="margin-bottom:16px;">
+      <div class="stat-card">
+        <div class="stat-label">年間利益</div>
+        <div class="stat-value ${totalProfit>=0?"green":"red"}">${totalProfit>=0?"+":""}¥${totalProfit.toLocaleString()}</div>
+        <div class="stat-sub">売却 ${totalSoldQty}点</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">年間売上</div>
+        <div class="stat-value">¥${totalRev.toLocaleString()}</div>
+        <div class="stat-sub">${totalRev>0?"利益率 "+Math.round(totalProfit/totalRev*100)+"%":"—"}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">年間仕入</div>
+        <div class="stat-value">¥${totalBuyCost.toLocaleString()}</div>
+        <div class="stat-sub">アクティブ ${activeMonths.length}ヶ月</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">最高月</div>
+        <div class="stat-value green" style="font-size:15px;">${bestMonth ? bestMonth.label : "—"}</div>
+        <div class="stat-sub">${bestMonth ? "+¥"+bestMonth.profit.toLocaleString() : "データなし"}</div>
+      </div>
+    </div>
+
+    <!-- 月別利益グラフ -->
+    <div class="chart-card" style="margin-bottom:12px;">
+      <div class="chart-title">MONTHLY PROFIT — ${monthlyYear}</div>
+      ${svgChart}
+      <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--muted);">
+        <span><span style="color:var(--green);font-weight:900;">■</span> 利益</span>
+        <span><span style="color:var(--red);font-weight:900;">■</span> 損失</span>
+        <span style="margin-left:auto;">最大: ¥${maxAbsProfit.toLocaleString()}</span>
+      </div>
+    </div>
+
+    <!-- 月別カード一覧 -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+      ${monthData.map(d => {
+        const hasData = d.boughtQty > 0 || d.soldQty > 0;
+        const isBest  = bestMonth  && d.ym === bestMonth.ym;
+        const isWorst = worstMonth && d.ym === worstMonth.ym && worstMonth.profit < 0;
+        const borderColor = isBest ? "var(--green)" : isWorst ? "var(--red)" : "var(--border)";
+        return `
+        <div class="stat-card" style="border:1px solid ${borderColor};opacity:${hasData?1:0.45};">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-size:13px;font-weight:900;">${d.label}</div>
+            ${isBest ? '<span style="font-size:10px;color:var(--green);font-weight:700;">🏆 最高</span>' : isWorst ? '<span style="font-size:10px;color:var(--red);font-weight:700;">⚠️ 最低</span>' : ""}
+          </div>
+          ${hasData ? `
+          <div style="font-size:18px;font-weight:900;color:${d.profit>0?"var(--green)":d.profit<0?"var(--red)":"var(--text)"};">
+            ${d.profit===0?"¥0":(d.profit>0?"+":"")}¥${d.profit.toLocaleString()}
+          </div>
+          <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+            <div style="font-size:10px;color:var(--muted);">売上<br><span style="font-size:12px;font-weight:700;color:var(--text);">¥${d.sellRev.toLocaleString()}</span></div>
+            <div style="font-size:10px;color:var(--muted);">仕入<br><span style="font-size:12px;font-weight:700;color:var(--text);">¥${d.buyCost.toLocaleString()}</span></div>
+          </div>
+          <div style="margin-top:5px;font-size:10px;color:var(--muted);">
+            仕入${d.boughtQty}点 · 売却${d.soldQty}点${d.margin!==null?" · 利益率"+d.margin+"%":""}
+          </div>` : `<div style="font-size:12px;color:var(--muted);">データなし</div>`}
+        </div>`;
+      }).join("")}
+    </div>
+
+    ${crossTable}
+  `;
 }
 
 // ═══════════ SETTINGS ═══════════
