@@ -337,6 +337,18 @@
   .progress-bar-wrap { background: var(--surface2); border-radius: 6px; height: 10px; margin-top: 8px; overflow: hidden; }
   .progress-bar-fill { height: 100%; border-radius: 6px; transition: width .5s ease; }
 
+  /* ── CALENDAR ── */
+  .cal-upcoming-strip { display:flex; flex-direction:column; gap:6px; }
+  .cal-ev-chip {
+    display:flex; align-items:center; gap:8px; padding:7px 10px;
+    border-radius:6px; cursor:default;
+  }
+  .cal-ev-chip .ev-icon { font-size:16px; flex-shrink:0; }
+  .cal-ev-chip .ev-body { flex:1; min-width:0; }
+  .cal-ev-chip .ev-title { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cal-ev-chip .ev-sub   { font-size:11px; margin-top:2px; opacity:.7; }
+  .cal-ev-chip .ev-days  { font-size:12px; font-weight:700; white-space:nowrap; }
+
   @media print {
     #setup-screen, .header .tabs, .btn-add, #sync-indicator, .tab-btn { display: none !important; }
     .header { position: static; border: none; padding: 0; }
@@ -426,6 +438,7 @@
       <button class="tab-btn" onclick="switchTab('monthly',this)">📅 月次レポート</button>
       <button class="tab-btn" onclick="switchTab('tax',this)">🧾 確定申告</button>
       <button class="tab-btn" onclick="switchTab('settings',this)">⚙️ 設定</button>
+      <button class="tab-btn" onclick="switchTab('calendar',this)">📅 カレンダー</button>
     </div>
   </div>
 
@@ -437,6 +450,7 @@
     <div id="tab-monthly" style="display:none"></div>
     <div id="tab-tax" style="display:none"></div>
     <div id="tab-settings" style="display:none"></div>
+    <div id="tab-calendar" style="display:none"></div>
   </div>
 </div>
 
@@ -552,7 +566,8 @@ const KEYS = {
   images: "resale_images",
   genres: "resale_genres",
   platforms: "resale_platforms",
-  gemini: "resale_gemini_key"
+  gemini: "resale_gemini_key",
+  calEvents: "resale_cal_events",
 };
 
 // localStorage wrapper（window.storageがなくてもlocalStorageで動く）
@@ -580,6 +595,29 @@ const ALL_GENRES = [
 ];
 let GENRES = []; // ストレージから読み込み・設定で管理
 let PLATFORMS = ["メルカリ","Amazon","ヤフオク","楽天","店頭買取","その他"];
+// ═══════════ CALENDAR PRESETS & CONSTANTS ═══════════
+const POKEMON_PRESET_EVENTS = [
+  // 2025年
+  { id:"pk_2025_1", date:"2025-04-18", title:"ロケット団の栄光",                      category:"ポケカ新弾", preset:true, note:"拡張パック" },
+  { id:"pk_2025_2", date:"2025-04-18", title:"ロケット団の栄光 アタッシュケースセット", category:"ポケカ新弾", preset:true, note:"特別セット" },
+  { id:"pk_2025_3", date:"2025-06-06", title:"ブラックボルト",                         category:"ポケカ新弾", preset:true, note:"拡張パック" },
+  { id:"pk_2025_4", date:"2025-06-06", title:"ホワイトフレア",                         category:"ポケカ新弾", preset:true, note:"拡張パック" },
+  // 2026年
+  { id:"pk_2026_1", date:"2026-01-23", title:"ムニキスゼロ",                           category:"ポケカ新弾", preset:true, note:"拡張パック" },
+  { id:"pk_2026_2", date:"2026-03-13", title:"ニンジャスピナー",                        category:"ポケカ新弾", preset:true, note:"拡張パック" },
+  // 予定（随時更新）
+  { id:"pk_2026_3", date:"2026-10-20", title:"CELEBRATION COLLECTION（予定）",         category:"ポケカ新弾", preset:true, note:"30周年記念拡張パック（推定）" },
+];
+
+const CAL_CATS = {
+  "ポケカ新弾": { icon:"🃏", color:"#1565C0", bg:"#DBEAFE" },
+  "他トレカ":   { icon:"🎴", color:"#7C3AED", bg:"#EDE9FE" },
+  "ゲーム":     { icon:"🎮", color:"#15803D", bg:"#DCFCE7" },
+  "セール":     { icon:"🏷️", color:"#C2410C", bg:"#FFEDD5" },
+  "仕入れ予定": { icon:"📦", color:"#374151", bg:"#F3F4F6" },
+  "その他":     { icon:"📌", color:"#B91C1C", bg:"#FEE2E2" },
+};
+
 const DEMO_ITEMS = [
   {id:1,name:"ポケモンカード151 BOX",genre:"トレカ",buyStore:"トレカタウン西院本店",buyDate:"2024-01-15",buyPrice:4500,quantity:3,buyShippingFee:0,buyPlatformFee:0,status:"sold",sellPlatform:"メルカリ",sellDate:"2024-01-20",sellPrice:7200,shippingFee:215,platformFee:360,memo:"シュリンク付き"},
   {id:2,name:"iPhone 15 Pro 256GB",genre:"スマートフォン",buyStore:"ヨドバシカメラ京都店",buyDate:"2024-02-10",buyPrice:89000,quantity:1,buyShippingFee:0,buyPlatformFee:0,status:"sold",sellPlatform:"ヤフオク",sellDate:"2024-02-25",sellPrice:115000,shippingFee:1200,platformFee:11500,memo:"SIMフリー新品"},
@@ -597,6 +635,11 @@ let isDemoMode = false;
 let editingId = null;
 let currentTab = "dashboard";
 let isLoading = false;
+let calendarEvents = [];
+let calViewYear  = new Date().getFullYear();
+let calViewMonth = new Date().getMonth();
+let calSelectedDate = null;
+let calAddForm = null;
 
 // ═══════════ GAS API ═══════════
 async function gasGet() {
@@ -713,6 +756,9 @@ async function launchApp(demo) {
   imageStore = savedImages || {};
   document.getElementById("setup-screen").style.display = "none";
   document.getElementById("app").style.display = "flex";
+  const savedCalEvs = await loadData(KEYS.calEvents);
+  calendarEvents = savedCalEvs || [];
+  showReminderBanner();
   if (!demo) {
     const localItems = await loadData(KEYS.items);
     if (localItems) items = localItems.map(normalizeItem);
@@ -844,7 +890,7 @@ function switchTab(tab, el) {
   currentTab = tab;
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   el.classList.add("active");
-  ["dashboard","inventory","sold","trades","monthly","tax","settings"].forEach(t => {
+  ["dashboard","inventory","sold","trades","monthly","tax","settings","calendar"].forEach(t => {
     const tabEl = document.getElementById("tab-" + t);
     tabEl.style.display = t === tab ? "" : "none";
     if (t !== tab && (t === "inventory" || t === "sold")) tabEl.innerHTML = "";
@@ -860,6 +906,7 @@ function renderCurrentTab() {
   else if (currentTab === "monthly")   renderMonthly();
   else if (currentTab === "tax")       renderTax();
   else if (currentTab === "settings")  renderSettings();
+  else if (currentTab === "calendar")  renderCalendar();
 }
 
 // ═══════════ DASHBOARD ═══════════
@@ -2641,6 +2688,347 @@ function acKey(e, inputId) {
     list.style.display = 'none';
     acIndex = -1;
   }
+}
+
+// ═══════════ CALENDAR ═══════════
+function calAllEvents() {
+  return [...POKEMON_PRESET_EVENTS, ...calendarEvents];
+}
+
+function getDaysUntil(dateStr) {
+  const t = new Date(getJSTDate() + "T00:00:00");
+  const d = new Date(dateStr  + "T00:00:00");
+  return Math.round((d - t) / 864e5);
+}
+
+async function saveCalEvents() {
+  await saveData(KEYS.calEvents, calendarEvents);
+}
+
+async function deleteCalEvent(id) {
+  if (!confirm("このイベントを削除しますか？")) return;
+  calendarEvents = calendarEvents.filter(e => e.id !== id);
+  await saveCalEvents();
+  renderCalendar();
+}
+
+// ── Reminders ──
+function remKey(evId, days) { return `cal_dim_${evId}_${days}`; }
+function isDismissed(evId, days) { return localStorage.getItem(remKey(evId, days)) === "1"; }
+function dismissRem(evId, days) { localStorage.setItem(remKey(evId, days), "1"); }
+
+function getActiveReminders() {
+  const result = [];
+  for (const ev of calAllEvents()) {
+    const days = getDaysUntil(ev.date);
+    const levels = ev.preset ? [0,1,3,7] : (ev.reminders || []);
+    for (const lv of levels) {
+      if (days === lv && !isDismissed(ev.id, lv)) {
+        result.push({ ev, days });
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+function showReminderBanner() {
+  const old = document.getElementById("reminder-banner");
+  if (old) old.remove();
+  const rems = getActiveReminders();
+  if (!rems.length) return;
+
+  const banner = document.createElement("div");
+  banner.id = "reminder-banner";
+  banner.style.cssText = "background:#FEF3C7;border-bottom:2px solid #F59E0B;padding:10px 16px;position:sticky;top:var(--header-h,57px);z-index:190;";
+
+  const rows = rems.map(({ev, days}) => {
+    const cat = CAL_CATS[ev.category] || CAL_CATS["その他"];
+    const dLabel = days===0 ? "🔔 <b>今日！</b>" : days===1 ? "⏰ <b>明日</b>" : `📅 ${days}日後`;
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,.07);">
+        <span style="background:${cat.bg};color:${cat.color};border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;flex-shrink:0;">${cat.icon} ${ev.category}</span>
+        <span style="font-weight:700;font-size:13px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ev.title}</span>
+        <span style="font-size:12px;color:#92400E;white-space:nowrap;">${dLabel}</span>
+        <button onclick="calDismissOne('${ev.id}',${days})"
+          style="background:none;border:none;cursor:pointer;color:#92400E;font-size:18px;line-height:1;flex-shrink:0;padding:0 2px;">×</button>
+      </div>`;
+  }).join("");
+
+  banner.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-weight:900;color:#92400E;font-size:13px;">🔔 イベントリマインダー</span>
+      <button onclick="calDismissAll()" style="background:none;border:none;cursor:pointer;color:#92400E;font-size:12px;font-weight:700;">すべて閉じる ×</button>
+    </div>
+    ${rows}`;
+
+  const header = document.querySelector(".header");
+  header.insertAdjacentElement("afterend", banner);
+}
+
+function calDismissOne(evId, days) {
+  dismissRem(evId, days);
+  showReminderBanner();
+}
+function calDismissAll() {
+  getActiveReminders().forEach(({ev,days}) => dismissRem(ev.id, days));
+  const b = document.getElementById("reminder-banner");
+  if (b) b.remove();
+}
+
+// ── Calendar Render ──
+function renderCalendar() {
+  const today  = getJSTDate();
+  const allEvs = calAllEvents();
+
+  // events map: date → [ev, ...]
+  const evMap = {};
+  allEvs.forEach(ev => { (evMap[ev.date] = evMap[ev.date]||[]).push(ev); });
+
+  // upcoming 60 days
+  const upcoming = allEvs.filter(ev => { const d=getDaysUntil(ev.date); return d>=0&&d<=60; })
+                         .sort((a,b) => a.date.localeCompare(b.date));
+
+  // calendar grid
+  const firstDow = (new Date(calViewYear, calViewMonth, 1).getDay()+6)%7; // Mon=0
+  const lastDay  = new Date(calViewYear, calViewMonth+1, 0).getDate();
+  const dayNames = ["月","火","水","木","金","土","日"];
+
+  let cells = [];
+  // prev month padding
+  const prevDate = new Date(calViewYear, calViewMonth, 0);
+  for (let i=0; i<firstDow; i++) {
+    const d = prevDate.getDate()-firstDow+1+i;
+    const m = calViewMonth===0?12:calViewMonth;
+    const y = calViewMonth===0?calViewYear-1:calViewYear;
+    cells.push({ dateStr:`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`, day:d, other:true });
+  }
+  // this month
+  for (let d=1; d<=lastDay; d++) {
+    cells.push({ dateStr:`${calViewYear}-${String(calViewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`, day:d, other:false });
+  }
+  // next month padding
+  const rem = cells.length%7;
+  if (rem!==0) {
+    for (let d=1; d<=7-rem; d++) {
+      const m = calViewMonth===11?1:calViewMonth+2;
+      const y = calViewMonth===11?calViewYear+1:calViewYear;
+      cells.push({ dateStr:`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`, day:d, other:true });
+    }
+  }
+
+  const monthLabel = `${calViewYear}年${calViewMonth+1}月`;
+
+  const upcomingHTML = upcoming.length ? `
+    <div class="settings-card" style="margin-bottom:12px;padding:14px 16px;">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;">📅 直近のイベント（60日以内）</div>
+      <div class="cal-upcoming-strip">
+        ${upcoming.map(ev => {
+          const cat = CAL_CATS[ev.category]||CAL_CATS["その他"];
+          const d   = getDaysUntil(ev.date);
+          const dLabel = d===0 ? `<span style="color:#B45309;font-weight:900;">🔔 今日！</span>`
+                       : d===1 ? `<span style="color:#B45309;font-weight:700;">⏰ 明日</span>`
+                       : d<=7  ? `<span style="color:#C2410C;font-weight:700;">📅 ${d}日後</span>`
+                       :         `<span style="color:var(--muted);">${d}日後</span>`;
+          return `
+          <div class="cal-ev-chip" style="background:${cat.bg};">
+            <span class="ev-icon">${cat.icon}</span>
+            <div class="ev-body">
+              <div class="ev-title" style="color:${cat.color};">${ev.title}</div>
+              <div class="ev-sub">${ev.date}${ev.note?' · '+ev.note:''}</div>
+            </div>
+            <div class="ev-days">${dLabel}</div>
+            ${ev.preset?'':`<button onclick="deleteCalEvent('${ev.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;">🗑️</button>`}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>` : "";
+
+  const cellsHTML = cells.map(({dateStr,day,other}) => {
+    const isToday    = dateStr===today;
+    const isSelected = dateStr===calSelectedDate;
+    const evs        = evMap[dateStr]||[];
+    const dow        = (new Date(dateStr).getDay()+6)%7;
+    const isSat=dow===5, isSun=dow===6;
+    const dateNumColor = isSelected?"#fff":isToday?"#1565C0":isSat?"#1565C0":isSun?"#B71C1C":"var(--text)";
+    return `
+    <div onclick="calSelectDate('${dateStr}')"
+      style="min-height:54px;background:${isSelected?"#1A1A1A":isToday?"#EFF6FF":"var(--surface)"};
+             border:1px solid ${isSelected?"#1A1A1A":isToday?"#3B82F6":"var(--border)"};
+             border-radius:4px;padding:4px;cursor:pointer;opacity:${other?.45:1};transition:border-color .1s;">
+      <div style="font-size:12px;font-weight:${isToday||isSelected?900:700};color:${dateNumColor};margin-bottom:2px;">${day}</div>
+      ${evs.slice(0,3).map(ev => {
+        const cat=CAL_CATS[ev.category]||CAL_CATS["その他"];
+        return `<div style="font-size:9px;background:${isSelected?"rgba(255,255,255,.18)":cat.bg};color:${isSelected?"#fff":cat.color};border-radius:2px;padding:1px 3px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${cat.icon} ${ev.title}</div>`;
+      }).join("")}
+      ${evs.length>3?`<div style="font-size:9px;color:${isSelected?"rgba(255,255,255,.6)":"var(--muted)"};">+${evs.length-3}</div>`:""}
+    </div>`;
+  }).join("");
+
+  const selPanel = calSelectedDate ? renderCalSelPanel(calSelectedDate, evMap[calSelectedDate]||[]) : "";
+  const addFormHTML = calAddForm ? renderCalAddForm() : "";
+
+  document.getElementById("tab-calendar").innerHTML = `
+    ${upcomingHTML}
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <button onclick="calNav(-1)" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:18px;font-weight:700;">‹</button>
+        <div style="font-size:17px;font-weight:900;">${monthLabel}</div>
+        <button onclick="calNav(1)"  style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:18px;font-weight:700;">›</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;">
+        ${dayNames.map((n,i)=>`<div style="text-align:center;font-size:11px;font-weight:700;padding:4px;color:${i===5?"#1565C0":i===6?"#B71C1C":"var(--muted)"};">${n}</div>`).join("")}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
+        ${cellsHTML}
+      </div>
+    </div>
+    ${selPanel}
+    ${addFormHTML}
+    ${!calAddForm ? `
+    <button onclick="calOpenAdd(${calSelectedDate?`'${calSelectedDate}'`:'null'})"
+      style="width:100%;padding:11px;background:var(--text);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;margin-top:4px;">
+      ＋ イベントを追加
+    </button>` : ""}
+  `;
+}
+
+function renderCalSelPanel(dateStr, evs) {
+  const dateLabel = new Date(dateStr+"T00:00:00").toLocaleDateString("ja-JP",{year:"numeric",month:"long",day:"numeric",weekday:"short"});
+  if (!evs.length) return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px;">${dateLabel}</div>
+      <p style="color:var(--muted);font-size:13px;">この日のイベントはありません</p>
+    </div>`;
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px;">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px;">${dateLabel}</div>
+      ${evs.map(ev => {
+        const cat=CAL_CATS[ev.category]||CAL_CATS["その他"];
+        return `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;background:${cat.bg};border-radius:6px;margin-bottom:6px;">
+          <span style="font-size:20px;">${cat.icon}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:${cat.color};">${ev.title}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;">${ev.category}${ev.note?' · '+ev.note:''}</div>
+            ${ev.preset?`<span style="font-size:10px;color:${cat.color};font-weight:700;background:rgba(255,255,255,.7);border-radius:3px;padding:1px 6px;display:inline-block;margin-top:3px;">📋 公式プリセット</span>`:""}
+          </div>
+          ${ev.preset?"":`<button onclick="deleteCalEvent('${ev.id}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px;flex-shrink:0;">🗑️</button>`}
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function renderCalAddForm() {
+  const f = calAddForm;
+  return `
+    <div style="background:var(--surface);border:2px solid var(--text);border-radius:8px;padding:16px;margin-bottom:10px;">
+      <div style="font-size:15px;font-weight:900;margin-bottom:14px;">＋ イベントを追加</div>
+      <div class="form-group">
+        <label class="form-label">日付</label>
+        <input class="form-input" type="date" value="${f.date||''}" oninput="calAddForm.date=this.value" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">イベント名</label>
+        <input class="form-input" id="cal-form-title" type="text" value="${f.title||''}"
+          placeholder="例：カードショップ○○ セール" maxlength="50"
+          oninput="calAddForm.title=this.value" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">カテゴリ</label>
+        <select class="form-input" onchange="calAddForm.category=this.value">
+          ${Object.keys(CAL_CATS).map(c=>`<option value="${c}" ${c===f.category?"selected":""}>${CAL_CATS[c].icon} ${c}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ（任意）</label>
+        <input class="form-input" type="text" value="${f.note||''}"
+          placeholder="例：BOX購入チャンス" maxlength="80"
+          oninput="calAddForm.note=this.value" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="margin-bottom:8px;">リマインダー</label>
+        <div style="display:flex;flex-wrap:wrap;gap:7px;">
+          ${[7,3,1,0].map(d => {
+            const label = d===0?"当日":d===1?"前日":`${d}日前`;
+            const chk   = (f.reminders||[]).includes(d)?"checked":"";
+            return `<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 11px;">
+              <input type="checkbox" ${chk} onchange="calToggleRem(${d})" style="cursor:pointer;"> ${label}
+            </label>`;
+          }).join("")}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">✨ アプリを開いたときに通知が表示されます</div>
+      </div>
+      <div style="display:flex;gap:9px;margin-top:14px;">
+        <button onclick="calCancelAdd()" class="btn-cancel" style="flex:1;">キャンセル</button>
+        <button onclick="calSubmitAdd()" class="btn-save"   style="flex:2;">保存</button>
+      </div>
+    </div>`;
+}
+
+// ── Calendar controls ──
+function calNav(delta) {
+  calViewMonth += delta;
+  if (calViewMonth>11){ calViewMonth=0; calViewYear++; }
+  if (calViewMonth<0) { calViewMonth=11; calViewYear--; }
+  renderCalendar();
+}
+
+function calSelectDate(dateStr) {
+  calSelectedDate = calSelectedDate===dateStr ? null : dateStr;
+  if (calAddForm) calAddForm.date = dateStr;
+  renderCalendar();
+  // scroll selected panel into view
+  setTimeout(()=>{ document.querySelector("#tab-calendar [style*='border:2px']")?.scrollIntoView({behavior:"smooth",block:"nearest"}); },50);
+}
+
+function calOpenAdd(dateStr) {
+  calAddForm = {
+    date: dateStr || calSelectedDate || getJSTDate(),
+    title: "",
+    category: "その他",
+    note: "",
+    reminders: [1],
+  };
+  renderCalendar();
+  setTimeout(()=>{ document.getElementById("cal-form-title")?.focus(); },60);
+}
+
+function calCancelAdd() {
+  calAddForm = null;
+  renderCalendar();
+}
+
+function calToggleRem(days) {
+  if (!calAddForm) return;
+  if (!calAddForm.reminders) calAddForm.reminders = [];
+  const idx = calAddForm.reminders.indexOf(days);
+  if (idx===-1) calAddForm.reminders.push(days);
+  else calAddForm.reminders.splice(idx,1);
+}
+
+async function calSubmitAdd() {
+  if (!calAddForm?.date)        { showToast("日付を入力してください","error"); return; }
+  if (!calAddForm?.title?.trim()){ showToast("イベント名を入力してください","error"); return; }
+  const ev = {
+    id: "usr_"+Date.now(),
+    date: calAddForm.date,
+    title: calAddForm.title.trim(),
+    category: calAddForm.category||"その他",
+    note: calAddForm.note||"",
+    reminders: calAddForm.reminders||[],
+    preset: false,
+  };
+  calendarEvents.push(ev);
+  await saveCalEvents();
+  calAddForm = null;
+  calSelectedDate = ev.date;
+  const d = new Date(ev.date+"T00:00:00");
+  calViewYear = d.getFullYear();
+  calViewMonth = d.getMonth();
+  showToast("✅ イベントを追加しました","success");
+  renderCalendar();
+  showReminderBanner();
 }
 
 document.addEventListener('focusout', e => {
