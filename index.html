@@ -1080,7 +1080,8 @@ function renderTrades() {
             </div>
             <div style="background:var(--surface2);border-radius:6px;padding:9px 11px;">
               <div style="font-size:10px;color:var(--muted);font-weight:700;letter-spacing:.04em;margin-bottom:4px;">売却</div>
-              <div style="font-size:13px;font-weight:700;">¥${(item.sellPrice||0).toLocaleString()}</div>
+              <div style="font-size:13px;font-weight:700;">¥${((item.sellPrice||0)*(item.quantity||1)).toLocaleString()}</div>
+              ${(item.quantity||1)>1?`<div style="font-size:10px;color:var(--muted);margin-top:1px;">¥${(item.sellPrice||0).toLocaleString()}/個</div>`:""}
               <div style="font-size:11px;color:var(--muted);margin-top:2px;">${item.sellPlatform||"—"} · ${item.sellDate||""}</div>
             </div>
           </div>
@@ -1298,11 +1299,13 @@ function renderList(tab) {
             <div class="item-nums">
               <div class="num-block">
                 <div class="num-label">仕入額 (${item.buyDate||"—"})</div>
-                <div class="num-value">¥${(item.buyPrice*item.quantity).toLocaleString()}</div>
+                <div class="num-value">¥${(item.buyPrice*(item.quantity||1)).toLocaleString()}</div>
+                ${(item.quantity||1)>1?`<div style="font-size:10px;color:var(--muted);margin-top:2px;">¥${(item.buyPrice*1).toLocaleString()}/個</div>`:""}
               </div>
               <div class="num-block">
                 <div class="num-label">販売額 (${item.sellDate||"—"})</div>
-                <div class="num-value">${item.sellPrice?`¥${(item.sellPrice*1).toLocaleString()}`:"—"}</div>
+                <div class="num-value">${item.sellPrice?`¥${((item.sellPrice||0)*(item.quantity||1)).toLocaleString()}`:"—"}</div>
+                ${item.sellPrice&&(item.quantity||1)>1?`<div style="font-size:10px;color:var(--muted);margin-top:2px;">¥${(item.sellPrice*1).toLocaleString()}/個</div>`:""}
               </div>
               <div class="num-block">
                 <div class="num-label">利益</div>
@@ -1440,6 +1443,8 @@ async function executePartialSale(productName) {
 }
 
 // ═══════════ MONTHLY REPORT ═══════════
+const monthOpenState    = new Map(); // ym → 展開中か
+const monthSectionState = new Map(); // ym → 'both'|'buy'|'sell'
 let monthlyYear = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }).slice(0, 4);
 
 function renderMonthly() {
@@ -1580,36 +1585,170 @@ function renderMonthly() {
       </div>
     </div>
 
-    <!-- 月別カード一覧 -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
-      ${monthData.map(d => {
-        const hasData = d.boughtQty > 0 || d.soldQty > 0;
+    <!-- 月別カード一覧（展開式） -->
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:600;">カードをタップして仕入れ・売却の詳細を表示</div>
+    <div id="monthly-cards" style="margin-bottom:16px;">
+      ${monthData.filter(d => d.boughtQty > 0 || d.soldQty > 0).map(d => {
         const isBest  = bestMonth  && d.ym === bestMonth.ym;
         const isWorst = worstMonth && d.ym === worstMonth.ym && worstMonth.profit < 0;
-        const borderColor = isBest ? "var(--green)" : isWorst ? "var(--red)" : "var(--border)";
+        const borderStyle = isBest ? "2px solid var(--green)" : isWorst ? "2px solid var(--red)" : "1px solid var(--border)";
         return `
-        <div class="stat-card" style="border:1px solid ${borderColor};opacity:${hasData?1:0.45};">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-            <div style="font-size:13px;font-weight:900;">${d.label}</div>
-            ${isBest ? '<span style="font-size:10px;color:var(--green);font-weight:700;">🏆 最高</span>' : isWorst ? '<span style="font-size:10px;color:var(--red);font-weight:700;">⚠️ 最低</span>' : ""}
+        <div style="background:var(--surface);border:${borderStyle};border-radius:8px;margin-bottom:8px;overflow:hidden;">
+          <button onclick="toggleMonthDetail('${d.ym}')" id="mcard-${d.ym}"
+            style="width:100%;background:none;border:none;padding:14px 16px;cursor:pointer;font-family:inherit;
+              display:grid;grid-template-columns:auto 1fr 1fr 1fr auto;gap:10px;align-items:center;text-align:left;">
+            <div>
+              <div style="font-size:15px;font-weight:900;">${d.label}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:2px;">仕入${d.boughtQty}点 / 売却${d.soldQty}点</div>
+              ${isBest?'<span style="font-size:10px;color:var(--green);font-weight:700;">🏆 最高</span>':isWorst?'<span style="font-size:10px;color:var(--red);font-weight:700;">⚠️ 最低</span>':""}
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px;">仕入合計</div>
+              <div style="font-size:13px;font-weight:800;">${d.boughtQty>0?`¥${d.buyCost.toLocaleString()}`:"—"}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px;">売上合計</div>
+              <div style="font-size:13px;font-weight:800;color:var(--green);">${d.soldQty>0?`¥${d.sellRev.toLocaleString()}`:"—"}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10px;color:var(--muted);font-weight:700;margin-bottom:2px;">利益</div>
+              <div style="font-size:14px;font-weight:900;color:${d.profit>0?"var(--green)":d.profit<0?"var(--red)":"var(--text)"};">
+                ${d.soldQty>0?(d.profit===0?"¥0":(d.profit>0?"+":"")+"¥"+d.profit.toLocaleString()):"—"}
+              </div>
+              ${d.soldQty>0&&d.margin!==null?`<div style="font-size:10px;color:var(--muted);">利益率 ${d.margin}%</div>`:""}
+            </div>
+            <div id="mcard-arrow-${d.ym}"
+              style="width:26px;height:26px;background:var(--surface2);border-radius:5px;border:1px solid var(--border);
+                display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--muted);
+                transition:transform .2s;flex-shrink:0;">▼</div>
+          </button>
+          <div id="mdetail-${d.ym}" style="display:none;border-top:1px solid var(--border);">
+            <div style="padding:8px 14px;display:flex;gap:6px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <button id="msec-${d.ym}-both" onclick="setMonthSection('${d.ym}','both');event.stopPropagation();"
+                style="padding:4px 12px;font-size:12px;font-weight:700;border-radius:6px;cursor:pointer;font-family:inherit;
+                  background:var(--text);color:#fff;border:1px solid var(--text);">📋 すべて</button>
+              <button id="msec-${d.ym}-buy" onclick="setMonthSection('${d.ym}','buy');event.stopPropagation();"
+                style="padding:4px 12px;font-size:12px;font-weight:700;border-radius:6px;cursor:pointer;font-family:inherit;
+                  background:var(--surface);color:var(--muted);border:1px solid var(--border);">🛒 仕入れ</button>
+              <button id="msec-${d.ym}-sell" onclick="setMonthSection('${d.ym}','sell');event.stopPropagation();"
+                style="padding:4px 12px;font-size:12px;font-weight:700;border-radius:6px;cursor:pointer;font-family:inherit;
+                  background:var(--surface);color:var(--muted);border:1px solid var(--border);">💰 売却</button>
+            </div>
+            <div id="msec-content-${d.ym}"></div>
           </div>
-          ${hasData ? `
-          <div style="font-size:18px;font-weight:900;color:${d.profit>0?"var(--green)":d.profit<0?"var(--red)":"var(--text)"};">
-            ${d.profit===0?"¥0":(d.profit>0?"+":"")}¥${d.profit.toLocaleString()}
-          </div>
-          <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
-            <div style="font-size:10px;color:var(--muted);">売上<br><span style="font-size:12px;font-weight:700;color:var(--text);">¥${d.sellRev.toLocaleString()}</span></div>
-            <div style="font-size:10px;color:var(--muted);">仕入<br><span style="font-size:12px;font-weight:700;color:var(--text);">¥${d.buyCost.toLocaleString()}</span></div>
-          </div>
-          <div style="margin-top:5px;font-size:10px;color:var(--muted);">
-            仕入${d.boughtQty}点 · 売却${d.soldQty}点${d.margin!==null?" · 利益率"+d.margin+"%":""}
-          </div>` : `<div style="font-size:12px;color:var(--muted);">データなし</div>`}
         </div>`;
       }).join("")}
     </div>
 
     ${crossTable}
   `;
+}
+
+
+// ═══════════ MONTHLY DETAIL FUNCTIONS ═══════════
+function toggleMonthDetail(ym) {
+  const drawer = document.getElementById("mdetail-" + ym);
+  const arrow  = document.getElementById("mcard-arrow-" + ym);
+  if (!drawer) return;
+  const isOpen = drawer.style.display !== "none";
+  drawer.style.display = isOpen ? "none" : "block";
+  if (arrow) arrow.style.transform = isOpen ? "rotate(0deg)" : "rotate(180deg)";
+  if (!isOpen) {
+    if (!monthSectionState.has(ym)) monthSectionState.set(ym, "both");
+    renderMonthSection(ym);
+  }
+}
+
+function setMonthSection(ym, section) {
+  monthSectionState.set(ym, section);
+  ["both","buy","sell"].forEach(s => {
+    const btn = document.getElementById("msec-" + ym + "-" + s);
+    if (!btn) return;
+    const active = s === section;
+    btn.style.background    = active ? "var(--text)"    : "var(--surface)";
+    btn.style.color         = active ? "#fff"           : "var(--muted)";
+    btn.style.borderColor   = active ? "var(--text)"    : "var(--border)";
+  });
+  renderMonthSection(ym);
+}
+
+function renderMonthSection(ym) {
+  const content = document.getElementById("msec-content-" + ym);
+  if (!content) return;
+  const section = monthSectionState.get(ym) || "both";
+  const icons = {"トレカ":"🃏","スマートフォン":"📱","ゲーム機・ソフト":"🎮","タブレット":"💻","カメラ":"📷","ブランド品":"👜","その他":"📦"};
+
+  const bought = items.filter(i => (i.buyDate||"").startsWith(ym));
+  const sold   = items.filter(i => i.status === "sold" && (i.sellDate||"").startsWith(ym));
+
+  const buyTotal   = bought.reduce((s,i) => s + (Number(i.buyPrice)||0)*(Number(i.quantity)||1) + (Number(i.buyShippingFee)||0) + (Number(i.buyPlatformFee)||0), 0);
+  const sellTotal  = sold.reduce((s,i) => s + (Number(i.sellPrice)||0)*(Number(i.quantity)||1), 0);
+  const profitTotal = sold.reduce((s,i) => s + (calcProfit(i)||0), 0);
+
+  function miniRow(item, type) {
+    const qty = Number(item.quantity) || 1;
+    const isBuy = type === "buy";
+    const dateStr   = isBuy ? item.buyDate : item.sellDate;
+    const storeOrPlatform = isBuy ? (item.buyStore||"—") : (item.sellPlatform||"—");
+    const unitPrice = Number(isBuy ? item.buyPrice : item.sellPrice) || 0;
+    const total     = unitPrice * qty;
+    const pft       = !isBuy ? calcProfit(item) : null;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${icons[item.genre]||"📦"} ${item.name||"—"}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">${storeOrPlatform}${qty>1?` <span style="color:var(--blue);font-weight:700;">×${qty}</span>`:""}</div>
+      </div>
+      <div style="text-align:right;margin-left:12px;flex-shrink:0;">
+        <div style="font-size:13px;font-weight:800;color:${isBuy?"var(--text)":"var(--green)"};">¥${total.toLocaleString()}</div>
+        ${qty>1?`<div style="font-size:10px;color:var(--muted);">¥${unitPrice.toLocaleString()}/個</div>`:""}
+        ${pft!==null?`<div style="font-size:11px;font-weight:700;color:${pft>=0?"var(--green)":"var(--red)"};">${pft>=0?"+":""}¥${pft.toLocaleString()}</div>`:""}
+      </div>
+      <div style="margin-left:10px;font-size:11px;color:var(--muted);text-align:right;flex-shrink:0;">${(dateStr||"—").slice(5,10)}</div>
+    </div>`;
+  }
+
+  let html = "";
+
+  // 仕入れセクション
+  if (section === "both" || section === "buy") {
+    html += `<div style="padding:10px 14px 6px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;font-weight:800;">🛒 仕入れ（${bought.length}件）</span>
+      <span style="font-size:13px;font-weight:800;">合計 ¥${buyTotal.toLocaleString()}</span>
+    </div>`;
+    html += bought.length === 0
+      ? `<div style="padding:10px 14px 14px;font-size:13px;color:var(--muted);">仕入れなし</div>`
+      : bought.slice().sort((a,b)=>(a.buyDate||"").localeCompare(b.buyDate||"")).map(i=>miniRow(i,"buy")).join("");
+  }
+
+  // セパレーター
+  if (section === "both" && bought.length > 0 && sold.length > 0) {
+    html += `<div style="height:1px;background:var(--border);margin:0 14px;"></div>`;
+  }
+
+  // 売却セクション
+  if (section === "both" || section === "sell") {
+    html += `<div style="padding:10px 14px 6px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;font-weight:800;color:var(--green);">💰 売却（${sold.length}件）</span>
+      <div style="text-align:right;">
+        <div style="font-size:13px;font-weight:800;color:var(--green);">売上 ¥${sellTotal.toLocaleString()}</div>
+        ${sold.length>0?`<div style="font-size:11px;font-weight:700;color:${profitTotal>=0?"var(--green)":"var(--red)"};">利益 ${profitTotal>=0?"+":""}¥${profitTotal.toLocaleString()}</div>`:""}
+      </div>
+    </div>`;
+    html += sold.length === 0
+      ? `<div style="padding:10px 14px 14px;font-size:13px;color:var(--muted);">売却なし</div>`
+      : sold.slice().sort((a,b)=>(a.sellDate||"").localeCompare(b.sellDate||"")).map(i=>miniRow(i,"sell")).join("");
+
+    if (sold.length > 0) {
+      const shippingSum = sold.reduce((s,i)=>s+(Number(i.shippingFee)||0),0);
+      const feeSum      = sold.reduce((s,i)=>s+(Number(i.platformFee)||0),0);
+      html += `<div style="padding:8px 14px;background:var(--surface2);border-top:1px solid var(--border);display:flex;gap:16px;justify-content:flex-end;font-size:12px;color:var(--muted);">
+        <span>送料合計 ¥${shippingSum.toLocaleString()}</span>
+        <span>手数料合計 ¥${feeSum.toLocaleString()}</span>
+      </div>`;
+    }
+  }
+
+  content.innerHTML = html;
 }
 
 // ═══════════ TAX / 確定申告 ═══════════
@@ -2430,6 +2569,7 @@ function renderForm() {
       <div style="flex:2">
         <label class="form-label">仕入れ価格（1個あたり）</label>
         <input class="form-input" type="number" value="${f.buyPrice}" placeholder="0" oninput="formData.buyPrice=this.value;updatePreview()" />
+        <div id="buy-total-bar"></div>
       </div>
       <div>
         <label class="form-label">仕入れ送料</label>
@@ -2465,8 +2605,9 @@ function renderForm() {
         </div>
         <div class="form-row">
           <div>
-            <label class="form-label">販売価格（合計）</label>
+            <label class="form-label">販売価格（1個あたり）</label>
             <input class="form-input" type="number" value="${f.sellPrice}" placeholder="0" oninput="formData.sellPrice=this.value;updatePreview()" />
+            <div id="sell-total-bar"></div>
           </div>
           <div>
             <label class="form-label">送料</label>
@@ -2521,12 +2662,42 @@ function setStatus(s) {
 }
 
 function updatePreview() {
+  const qty = +formData.quantity || 1;
+
+  // 仕入れ合計バー
+  const buyBarEl = document.getElementById("buy-total-bar");
+  if (buyBarEl) {
+    const buyUnit = +formData.buyPrice || 0;
+    if (buyUnit > 0 && qty > 1) {
+      buyBarEl.innerHTML = `<div style="display:flex;justify-content:space-between;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:5px 10px;margin-top:5px;font-size:12px;">
+        <span style="color:#1D4ED8;font-weight:600;">¥${buyUnit.toLocaleString()} × ${qty}個</span>
+        <span style="color:#1E40AF;font-weight:800;">仕入合計 ¥${(buyUnit*qty).toLocaleString()}</span>
+      </div>`;
+    } else { buyBarEl.innerHTML = ""; }
+  }
+
+  // 販売合計バー
+  const sellBarEl = document.getElementById("sell-total-bar");
+  if (sellBarEl) {
+    const sellUnit = +formData.sellPrice || 0;
+    if (sellUnit > 0 && qty > 1) {
+      sellBarEl.innerHTML = `<div style="display:flex;justify-content:space-between;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:5px 10px;margin-top:5px;font-size:12px;">
+        <span style="color:#16A34A;font-weight:600;">¥${sellUnit.toLocaleString()} × ${qty}個</span>
+        <span style="color:#047857;font-weight:800;">販売合計 ¥${(sellUnit*qty).toLocaleString()}</span>
+      </div>`;
+    } else { sellBarEl.innerHTML = ""; }
+  }
+
+  // 利益プレビュー
   const el = document.getElementById("profit-preview");
   if (!el || formData.status !== "sold") return;
-  const p = calcProfit({...formData, buyPrice:+formData.buyPrice||0, sellPrice:+formData.sellPrice||0, quantity:+formData.quantity||1, shippingFee:+formData.shippingFee||0, platformFee:+formData.platformFee||0});
+  const p = calcProfit({...formData, buyPrice:+formData.buyPrice||0, sellPrice:+formData.sellPrice||0, quantity:qty, shippingFee:+formData.shippingFee||0, platformFee:+formData.platformFee||0});
   if (p === null) { el.innerHTML = ""; return; }
   el.innerHTML = `<div class="profit-preview ${p>=0?"pos":"neg"}">
-    <span class="preview-label">利益プレビュー</span>
+    <div>
+      <span class="preview-label">利益プレビュー</span>
+      ${qty>1?`<div style="font-size:11px;color:var(--muted);margin-top:2px;">1個あたり ¥${Math.round(p/qty).toLocaleString()}</div>`:""}
+    </div>
     <span class="preview-amount" style="color:${p>=0?"#3FB950":"#F85149"}">${p>=0?"+":""}¥${p.toLocaleString()}</span>
   </div>`;
 }
